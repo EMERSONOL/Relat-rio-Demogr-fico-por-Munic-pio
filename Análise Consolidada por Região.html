@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Demográfico - Rio de Janeiro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Chosen Palette: Calm Neutrals -->
+    <!-- Application Structure Plan: A top-down dashboard layout was chosen for optimal user flow. The primary interaction is a municipality selector at the top, which controls all content below. This is followed by high-level Key Performance Indicators (KPIs) for a quick overview. Detailed visualizations (bar and donut charts) are presented next in a clear two-column layout. A new section powered by the Gemini API provides AI-generated narrative analysis, adding a qualitative layer to the quantitative data. Finally, the raw data is available at the bottom. This structure supports progressive disclosure, starting with a summary and allowing users to drill down into details and AI-driven insights. -->
+    <!-- Visualization & Content Choices: Report Info: Population totals and racial breakdown (White, Black) for 2010 and 2022 (est.). Goal: Compare demographic changes. Viz/Presentation: 1) Dropdown to select municipality (Goal: Filter). 2) KPI cards for key stats (Goal: Inform). 3) Grouped Bar Chart (Chart.js) to compare absolute numbers of White/Black populations between 2010 and 2022 (Goal: Compare Change). 4) Donut Chart (Chart.js) to show 2010 racial composition (Goal: Show Proportion). 5) Gemini API Integration: A button triggers an LLM call to generate a textual analysis of the selected municipality's data (Goal: Synthesize & Explain). Interaction: The dropdown drives all updates. The "Generate Analysis" button calls the Gemini API and displays the text response. Justification: This combination provides a multi-faceted view, from high-level summaries to detailed comparisons, now enriched with AI-generated narrative to improve understanding. -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc; /* slate-50 */
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 400px;
+        }
+        @media (min-width: 768px) {
+            .chart-container {
+                height: 350px;
+            }
+        }
+        .kpi-card {
+            background-color: white;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            transition: transform 0.2s ease-in-out;
+        }
+        .kpi-card:hover {
+            transform: translateY(-4px);
+        }
+        .gemini-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .spinner {
+            border: 2px solid rgba(0, 0, 0, 0.1);
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border-left-color: white;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-slate-900">Dashboard Demográfico: Rio de Janeiro</h1>
+            <p class="mt-2 text-slate-600">Análise comparativa da população por cor/raça (Censos 2010 e 2022)</p>
+        </header>
+
+        <main>
+            <div class="max-w-md mx-auto mb-8 bg-white p-4 rounded-lg shadow-md">
+                <label for="municipio-selector" class="block text-sm font-medium text-slate-700 mb-2">Selecione para Análise:</label>
+                <select id="municipio-selector" class="w-full p-2 border border-slate-300 rounded-md shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                </select>
+            </div>
+
+            <section id="kpi-section" class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div class="kpi-card text-center">
+                    <h3 class="text-slate-500 font-medium">População 2010</h3>
+                    <p id="kpi-pop-2010" class="text-3xl font-bold text-blue-600 mt-2">-</p>
+                </div>
+                <div class="kpi-card text-center">
+                    <h3 class="text-slate-500 font-medium">População 2022</h3>
+                    <p id="kpi-pop-2022" class="text-3xl font-bold text-blue-600 mt-2">-</p>
+                </div>
+                <div class="kpi-card text-center">
+                    <h3 class="text-slate-500 font-medium">Crescimento Populacional</h3>
+                    <p id="kpi-crescimento" class="text-3xl font-bold text-blue-600 mt-2">-</p>
+                </div>
+            </section>
+            
+            <section class="bg-white p-4 sm:p-6 rounded-lg shadow-lg mb-8">
+                 <div class="text-center mb-6">
+                    <h2 id="charts-title" class="text-2xl font-bold text-slate-900">Análise Visual</h2>
+                    <p class="text-slate-600 mt-1">Comparativo entre 2010 e a estimativa para 2022.</p>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+                    <div class="w-full">
+                        <div class="chart-container">
+                            <canvas id="barChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="w-full">
+                         <div class="chart-container">
+                            <canvas id="donutChart"></canvas>
+                        </div>
+                        <p class="text-xs text-center text-slate-500 mt-2 px-4">A composição percentual de 2022 é uma estimativa baseada nos dados de 2010.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="bg-white p-4 sm:p-6 rounded-lg shadow-lg">
+                <div class="text-center">
+                    <h2 class="text-2xl font-bold text-slate-900">Análise Demográfica com IA ✨</h2>
+                    <p class="text-slate-600 mt-1 mb-4">Clique no botão para gerar uma análise contextual sobre o local selecionado.</p>
+                    <button id="gemini-analysis-btn" class="gemini-button bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center mx-auto disabled:bg-blue-400">
+                        <span id="gemini-spinner" class="spinner mr-2 hidden"></span>
+                        Gerar Análise
+                    </button>
+                </div>
+                <div id="gemini-result" class="mt-4 p-4 bg-slate-50 rounded-lg min-h-[100px] text-slate-700 leading-relaxed">
+                    <p class="text-slate-500 italic text-center">A análise gerada por IA aparecerá aqui.</p>
+                </div>
+            </section>
+
+        </main>
+        
+        <footer class="text-center mt-12 text-sm text-slate-500">
+            <p><strong>Fonte:</strong> Instituto Brasileiro de Geografia e Estatística (IBGE), Censos Demográficos de 2010 e 2022.</p>
+            <p class="mt-1"><strong>Metodologia:</strong> Os números de cor/raça para 2022 são estimativas calculadas aplicando-se as proporções do Censo de 2010 sobre a população total de 2022.</p>
+        </footer>
+    </div>
+
+    <script>
+        const data = [
+            { "municipio": "Angra dos Reis", "pop2010": 169511, "pop2022": 181228, "brancos2010": 45.0, "pretos2010": 11.2 },
+            { "municipio": "Aperibé", "pop2010": 10213, "pop2022": 10893, "brancos2010": 59.1, "pretos2010": 7.9 },
+            { "municipio": "Araruama", "pop2010": 112008, "pop2022": 126726, "brancos2010": 39.0, "pretos2010": 15.8 },
+            { "municipio": "Areal", "pop2010": 11423, "pop2022": 11765, "brancos2010": 50.1, "pretos2010": 15.7 },
+            { "municipio": "Armação dos Búzios", "pop2010": 27560, "pop2022": 39033, "brancos2010": 45.3, "pretos2010": 15.0 },
+            { "municipio": "Arraial do Cabo", "pop2010": 27715, "pop2022": 31030, "brancos2010": 47.8, "pretos2010": 12.9 },
+            { "municipio": "Barra do Piraí", "pop2010": 95390, "pop2022": 91025, "brancos2010": 38.3, "pretos2010": 22.3 },
+            { "municipio": "Barra Mansa", "pop2010": 177813, "pop2022": 166654, "brancos2010": 45.4, "pretos2010": 16.3 },
+            { "municipio": "Belford Roxo", "pop2010": 469332, "pop2022": 446731, "brancos2010": 27.1, "pretos2010": 19.8 },
+            { "municipio": "Bom Jardim", "pop2010": 25372, "pop2022": 28166, "brancos2010": 63.2, "pretos2010": 10.6 },
+            { "municipio": "Bom Jesus do Itabapoana", "pop2010": 35411, "pop2022": 35797, "brancos2010": 49.0, "pretos2010": 15.0 },
+            { "municipio": "Cabo Frio", "pop2010": 186227, "pop2022": 214057, "brancos2010": 41.8, "pretos2010": 15.4 },
+            { "municipio": "Cachoeiras de Macacu", "pop2010": 54370, "pop2022": 53887, "brancos2010": 41.6, "pretos2010": 9.2 },
+            { "municipio": "Cambuci", "pop2010": 14816, "pop2022": 14245, "brancos2010": 57.5, "pretos2010": 7.0 },
+            { "municipio": "Campos dos Goytacazes", "pop2010": 463731, "pop2022": 474667, "brancos2010": 42.0, "pretos2010": 17.6 },
+            { "municipio": "Cantagalo", "pop2010": 20130, "pop2022": 19443, "brancos2010": 48.8, "pretos2010": 18.8 },
+            { "municipio": "Carapebus", "pop2010": 13427, "pop2022": 13360, "brancos2010": 37.6, "pretos2010": 9.5 },
+            { "municipio": "Cardoso Moreira", "pop2010": 12480, "pop2022": 12686, "brancos2010": 49.0, "pretos2010": 12.1 },
+            { "municipio": "Carmo", "pop2010": 17436, "pop2022": 17149, "brancos2010": 48.1, "pretos2010": 20.2 },
+            { "municipio": "Casimiro de Abreu", "pop2010": 35359, "pop2022": 45570, "brancos2010": 48.4, "pretos2010": 12.0 },
+            { "municipio": "Duque de Caxias", "pop2010": 855048, "pop2022": 782799, "brancos2010": 35.3, "pretos2010": 14.5 },
+            { "municipio": "Itaboraí", "pop2010": 218008, "pop2022": 231004, "brancos2010": 35.7, "pretos2010": 12.1 },
+            { "municipio": "Itaguaí", "pop2010": 116841, "pop2022": 132867, "brancos2010": 38.8, "pretos2010": 9.4 },
+            { "municipio": "Japeri", "pop2010": 95492, "pop2022": 96595, "brancos2010": 23.2, "pretos2010": 21.6 },
+            { "municipio": "Magé", "pop2010": 227322, "pop2022": 248208, "brancos2010": 35.8, "pretos2010": 14.5 },
+            { "municipio": "Maricá", "pop2010": 128489, "pop2022": 223938, "brancos2010": 55.5, "pretos2010": 7.5 },
+            { "municipio": "Mesquita", "pop2010": 168376, "pop2022": 168849, "brancos2010": 35.9, "pretos2010": 14.8 },
+            { "municipio": "Nilópolis", "pop2010": 157425, "pop2022": 150281, "brancos2010": 42.7, "pretos2010": 13.4 },
+            { "municipio": "Niterói", "pop2010": 487562, "pop2022": 523664, "brancos2010": 57.1, "pretos2010": 12.5 },
+            { "municipio": "Nova Iguaçu", "pop2010": 796257, "pop2022": 825388, "brancos2010": 36.4, "pretos2010": 13.6 },
+            { "municipio": "Petrópolis", "pop2010": 295917, "pop2022": 298020, "brancos2010": 58.7, "pretos2010": 13.2 },
+            { "municipio": "Queimados", "pop2010": 137961, "pop2022": 139975, "brancos2010": 27.8, "pretos2010": 21.6 },
+            { "municipio": "Rio de Janeiro", "pop2010": 6320446, "pop2022": 6211223, "brancos2010": 45.4, "pretos2010": 15.6 },
+            { "municipio": "São Gonçalo", "pop2010": 999728, "pop2022": 896744, "brancos2010": 38.5, "pretos2010": 15.5 },
+            { "municipio": "Teresópolis", "pop2010": 163746, "pop2022": 165123, "brancos2010": 61.9, "pretos2010": 10.9 }
+        ];
+
+        let barChart, donutChart;
+        let currentData = {};
+
+        const numberFormatter = (value) => new Intl.NumberFormat('pt-BR').format(value);
+        const percentFormatter = (value) => `${value.toFixed(2)}%`.replace('.', ',');
+
+        const calculateStateOverview = () => {
+            const totalPop2010 = data.reduce((sum, item) => sum + item.pop2010, 0);
+            const totalPop2022 = data.reduce((sum, item) => sum + item.pop2022, 0);
+            const totalBrancos2010 = data.reduce((sum, item) => sum + (item.pop2010 * item.brancos2010 / 100), 0);
+            const totalPretos2010 = data.reduce((sum, item) => sum + (item.pop2010 * item.pretos2010 / 100), 0);
+
+            return {
+                municipio: "Estado do Rio de Janeiro (Visão Geral)",
+                pop2010: totalPop2010,
+                pop2022: totalPop2022,
+                brancos2010: (totalBrancos2010 / totalPop2010) * 100,
+                pretos2010: (totalPretos2010 / totalPop2010) * 100
+            };
+        };
+
+        const updateDashboard = (selectedMunicipio) => {
+            const selectedData = selectedMunicipio === "overview" 
+                ? calculateStateOverview()
+                : data.find(item => item.municipio === selectedMunicipio);
+
+            if (!selectedData) return;
+            
+            currentData = selectedData;
+
+            document.getElementById('charts-title').innerText = `Análise Visual: ${selectedData.municipio}`;
+            document.getElementById('gemini-result').innerHTML = `<p class="text-slate-500 italic text-center">A análise gerada por IA aparecerá aqui.</p>`;
+
+            const pop2010 = selectedData.pop2010;
+            const pop2022 = selectedData.pop2022;
+            const crescimento = ((pop2022 - pop2010) / pop2010) * 100;
+
+            document.getElementById('kpi-pop-2010').innerText = numberFormatter(pop2010);
+            document.getElementById('kpi-pop-2022').innerText = numberFormatter(pop2022);
+            document.getElementById('kpi-crescimento').innerText = percentFormatter(crescimento);
+
+            const brancosAbs2010 = Math.round(pop2010 * selectedData.brancos2010 / 100);
+            const pretosAbs2010 = Math.round(pop2010 * selectedData.pretos2010 / 100);
+            const brancosAbs2022 = Math.round(pop2022 * selectedData.brancos2010 / 100);
+            const pretosAbs2022 = Math.round(pop2022 * selectedData.pretos2010 / 100);
+            const outrosPerc2010 = 100 - selectedData.brancos2010 - selectedData.pretos2010;
+
+            if (barChart) barChart.destroy();
+            barChart = new Chart(document.getElementById('barChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: ['2010', '2022 (est.)'],
+                    datasets: [{
+                        label: 'População Branca',
+                        data: [brancosAbs2010, brancosAbs2022],
+                        backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                        borderColor: 'rgba(59, 130, 246, 1)',
+                        borderWidth: 1
+                    }, {
+                        label: 'População Preta',
+                        data: [pretosAbs2010, pretosAbs2022],
+                        backgroundColor: 'rgba(29, 78, 216, 0.7)',
+                        borderColor: 'rgba(29, 78, 216, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { title: { display: true, text: 'População Absoluta por Cor/Raça', font: { size: 16 } }, tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${numberFormatter(context.raw)}` } } },
+                    scales: { y: { beginAtZero: true, ticks: { callback: (value) => numberFormatter(value) } } }
+                }
+            });
+
+            if (donutChart) donutChart.destroy();
+            donutChart = new Chart(document.getElementById('donutChart').getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: ['Brancos', 'Pretos', 'Outros'],
+                    datasets: [{
+                        data: [selectedData.brancos2010, selectedData.pretos2010, outrosPerc2010],
+                        backgroundColor: ['rgba(59, 130, 246, 0.7)', 'rgba(29, 78, 216, 0.7)', 'rgba(147, 197, 253, 0.7)'],
+                        borderColor: ['#ffffff'], borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { title: { display: true, text: 'Composição Racial Percentual (2010)', font: { size: 16 } }, tooltip: { callbacks: { label: (context) => `${context.label}: ${percentFormatter(context.raw)}` } } }
+                }
+            });
+        };
+        
+        async function callGeminiAPI(prompt, retries = 3, delay = 1000) {
+            for (let i = 0; i < retries; i++) {
+                try {
+                    let chatHistory = [{ role: "user", parts: [{ text: prompt }] }];
+                    const payload = { contents: chatHistory };
+                    const apiKey = "";
+                    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                    
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    
+                    if (result.candidates && result.candidates.length > 0 &&
+                        result.candidates[0].content && result.candidates[0].content.parts &&
+                        result.candidates[0].content.parts.length > 0) {
+                        return result.candidates[0].content.parts[0].text;
+                    } else {
+                        throw new Error("Resposta da API inválida ou vazia.");
+                    }
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                    await new Promise(res => setTimeout(res, delay * Math.pow(2, i)));
+                }
+            }
+        }
+
+        async function generateAnalysis() {
+            const button = document.getElementById('gemini-analysis-btn');
+            const spinner = document.getElementById('gemini-spinner');
+            const resultContainer = document.getElementById('gemini-result');
+
+            button.disabled = true;
+            spinner.classList.remove('hidden');
+            resultContainer.innerHTML = `<p class="text-slate-500 italic text-center">A IA está a analisar os dados... Por favor, aguarde.</p>`;
+            
+            try {
+                const pop2010 = numberFormatter(currentData.pop2010);
+                const pop2022 = numberFormatter(currentData.pop2022);
+                const crescimento = percentFormatter(((currentData.pop2022 - currentData.pop2010) / currentData.pop2010) * 100);
+                const brancos = percentFormatter(currentData.brancos2010);
+                const pretos = percentFormatter(currentData.pretos2010);
+
+                const prompt = `Você é um analista de dados especializado em demografia brasileira. Com base nos dados a seguir para "${currentData.municipio}", no estado do Rio de Janeiro, gere uma análise concisa em um único parágrafo. A análise deve abordar o crescimento (ou decrescimento) populacional entre 2010 e 2022 e a composição racial de 2010, oferecendo possíveis contextos socioeconômicos breves para esses números. Seja objetivo e baseie-se estritamente nos dados fornecidos.\n\nDados:\n- População em 2010: ${pop2010}\n- População em 2022: ${pop2022}\n- Variação Populacional: ${crescimento}\n- Composição Racial (2010): ${brancos} de brancos, ${pretos} de pretos.`;
+                
+                const analysisText = await callGeminiAPI(prompt);
+                resultContainer.innerText = analysisText;
+
+            } catch (error) {
+                resultContainer.innerHTML = `<p class="text-red-500 text-center">Ocorreu um erro ao gerar a análise. Por favor, tente novamente mais tarde.</p>`;
+            } finally {
+                button.disabled = false;
+                spinner.classList.add('hidden');
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const selector = document.getElementById('municipio-selector');
+            const geminiButton = document.getElementById('gemini-analysis-btn');
+            
+            const overviewOption = document.createElement('option');
+            overviewOption.value = "overview";
+            overviewOption.textContent = "Estado do Rio de Janeiro (Visão Geral)";
+            selector.appendChild(overviewOption);
+
+            data.sort((a, b) => a.municipio.localeCompare(b.municipio)).forEach(item => {
+                const option = document.createElement('option');
+                option.value = item.municipio;
+                option.textContent = item.municipio;
+                selector.appendChild(option);
+            });
+            
+            selector.addEventListener('change', (e) => updateDashboard(e.target.value));
+            geminiButton.addEventListener('click', generateAnalysis);
+            
+            updateDashboard("overview");
+        });
+    </script>
+</body>
+</html>
